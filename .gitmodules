@@ -1,0 +1,3 @@
+[submodule "lib/esht"]
+	path = lib/esht
+	url = https://gitlab.com/4bcx/esht.git

@@ -1,0 +1,352 @@
+#!/bin/sh
+# dweb - Dumb static WEbsite Builder
+# Licensed under the The Unlicense.
+# For more information, please refer to <https://unlicense.org>
+
+# This script should not be sourced, make sure to change the string 'dweb'
+#   to match this file's name
+[ 'dweb' = "$( basename ${0} )" ] || return 1
+
+SCRIPT=$( basename "$0" )
+VMAJOR=0
+VMINOR=0
+VPATCH=0
+HOMEPAGE="https://gitlab.com/4bcx/dweb"
+
+print_help () {
+	cat << END_OF_HELP_TEXT
+${SCRIPT} v${VMAJOR}.${VMINOR}.${VPATCH}
+Dumb static WEbsite Builder
+
+Usage: ${SCRIPT} [build] [-e KEY[=VALUE]...] [-f CONFIG_FILE]
+       ${SCRIPT} serve [-e KEY[=VALUE]...] [-f CONFIG_FILE]
+       ${SCRIPT} config [-e KEY[=VALUE]...] [-f CONFIG_FILE]
+       ${SCRIPT} -h | -v
+Builds or serves a static website from esht templates.
+
+Commands:
+  build                         build the website (default action)
+  serve                         launch a lightweight webserver
+  config                        write configuration to file
+
+Options:
+  -h, --help                    display this help text and exit
+  -v, --version                 print version and exit
+  -e, --env KEY[=VALUE]...      define variable KEY
+  -f, --config-file FILE        use configuration from FILE
+
+Variables and defaults:
+  SITE_TITLE                    default site title
+                                  default: 'example'
+  SITE_URL                      site root url
+                                  default: 'example.com'
+  SITE_DESC                     default description used in meta tags
+  SITE_IMAGE                    default image used in meta tags
+  SITE_INDEX                    file to symlink to index.html
+  SOURCE_DIR                    content directory
+                                  default: './src'
+  PARTS_DIR                     parts and templates directory
+                                  default: './prt'
+  BUILD_DIR                     output directory
+                                  default: './out'
+  TEMP_DIR                      temporaty directory
+                                  default: './tmp'
+  INCLUDES_DIR                  static files directory
+                                  default: './inc'
+  MAPPER_FILE                   mapper file to include
+                                  default: './map'
+  ESHT_SCRIPT                   esht executable
+                                  default: './lib/esht/esht'
+  MARKDOWN_EXT                  markdown files extension
+                                  default: 'md'
+  MARKDOWN_BIN                  markdown parsing executable
+                                  default: 'markdown'
+  MAIN_TEMPLATE                 default main template filename
+                                  default: 'main.html.esht'
+  META_EXT                      default meta files extension
+                                  default: 'meta'
+  SERVE_BIN                     webserver command
+                                  default: 'httpd -f -v -p 8000'
+
+Variables precedence:
+  1. Variables supplied using -e or --env options
+  2. Variables in configuration file or ./cfg file if found
+  3. Environmental variables exported brior to executing ${SCRIPT}
+  4. Default values below
+
+Meta files:
+  Meta files contain useful metadata required for each page
+much like JSON or YAML frontmatter used in other static site
+generators. They must be in the same directory as the page
+source file and with the same name but with .meta or the defined
+META_EXT appended to it. Generally the variables defined
+in the meta file are used by esht templates.
+
+Dependencies:
+  esht          REQUIRED        to process the templates
+  git           OPTIONAL        automatically get creation dates
+                                  update dates and author of pages
+  discount      OPTIONAL        provides default markdown processor
+  darkhttpd     OPTIONAL        default webserver
+
+Project homepage: <${HOMEPAGE}>
+END_OF_HELP_TEXT
+}
+
+print_version () {
+	VERSION="${VMAJOR}.${VMINOR}.${VPATCH}"
+	printf '%s Version %s\n' "${SCRIPT}" "${VERSION}"
+}
+
+print_error () {
+	ERROR_MSG=${1:-Unknown error}
+	printf '%s: %s\n' "${SCRIPT}" "${ERROR_MSG}" >&2
+}
+
+err_arg () {
+	print_error "${@}: Invalid argument"
+	print_help >&2
+	exit 22
+}
+
+TEMP_ENV_FILE="$( mktemp )"
+
+parse_var () {
+	KEY="${1%%=*}"
+	VALUE="${1#${KEY}}"
+	VALUE="${VALUE#=}"
+	SANE_KEY="$( printf '%s' ${KEY#[0-9]} | tr -dc [0-9a-zA-Z_] )"
+	if [ "${KEY}" = "${SANE_KEY}" ]; then
+		printf '%s="%s"\n' "${KEY}" "${VALUE}" >> "${TEMP_ENV_FILE}"
+	else
+		err_arg "${KEY}"
+	fi
+}
+
+parse_cfg () {
+	if [ -z "${1}" ]; then
+		print_error "Missing filename"
+		print_help >&2
+		exit 5
+	fi
+
+	CONFIG_FILE="${1}"
+	[ -f "${CONFIG_FILE}" ] && cat "${CONFIG_FILE}" >> ${TEMP_ENV_FILE}
+}
+
+load_cfg () {
+	[ -f './cfg' ] && . ./cfg
+	[ -f "${CONFIG_FILE}" ] && . $( realpath ${CONFIG_FILE} )
+	. ${TEMP_ENV_FILE}
+
+	MARKDOWN_EXT="$( printf '%s' ${MARKDOWN_EXT} \
+			| tr [:upper:] [:lower:] )"
+	META_EXT="$( printf '%s' ${META_EXT} \
+			| tr [:upper:] [:lower:] )"
+
+	if [ -x "${ESHT_SCRIPT}" ]; then
+		esht () { ${ESHT_SCRIPT} ${@}; }
+	else
+		print_error "esht: ${ESHT_SCRIPT} is not executable"
+		exit 1
+	fi
+
+	if git rev-parse --git-dir &> /dev/null; then
+		git_date_created () {
+			git log --follow --format=%ai -- ${INPUT} | tail -n 1
+		}
+		git_date_updated () {
+			git log --follow --format=%ai -- ${INPUT} | head -n 1
+		}
+	else
+		print_error "git: is not installed or this is not a repository"
+		git_date_created () { :; }
+		git_date_updated () { :; }
+	fi
+
+	if which ${MARKDOWN_BIN} &> /dev/null; then
+		md () { ${MARKDOWN_BIN} ${@}; }
+	else
+		print_error "markdown: ${MARKDOWN_BIN} cannot be found"
+		md () { cat ${@}; }
+	fi
+
+	if which ${SERVE_BIN} &> /dev/null; then
+		serve () { ${SERVE_BIN} ${@}; }
+	else
+		print_error "serve: ${SERVE_BIN} cannot be found"
+		serve () { :; }
+	fi
+}
+
+script_main () {
+	load_cfg
+	mkdir -p ${TEMP_DIR} ${BUILD_DIR}
+	cp -r ${INCLUDES_DIR#/}/* ${BUILD_DIR}
+
+	while read -r SRC DIST; do
+		DIST_DIR="$( dirname ${DIST} )"
+		mkdir -p "${BUILD_DIR}/${DIST_DIR}"
+		cp -ar ${SRC} "${BUILD_DIR}/${DIST}"
+	done < ${MAPPER_FILE}
+
+	for INPUT in $( find ${SOURCE_DIR} -type f \
+		! -empty \
+		! -name ".*" \
+		! -iname "*.${META_EXT}" \
+		); do
+
+		FILENAME="$( basename ${INPUT} )"
+		EXTENSION="$( printf '%s' ${FILENAME##*.} \
+			| tr [:upper:] [:lower:] )"
+		BASENAME="${FILENAME%.*}"
+		DIRNAME="$( dirname ${INPUT} )"
+		DIRNAME="${DIRNAME#${SOURCE_DIR}}"
+		DIRNAME="${DIRNAME#/}"
+		DIRNAME="${DIRNAME%/}"
+
+		[ "${FILENAME}" = "${BASENAME}" ] && EXTENSION=''
+		METAFILE="${INPUT}.${META_EXT}"
+		unset template
+		[ -f "${METAFILE}" ] && . "${META}"
+		TEMPLATE="$( find ${PARTS_DIR} \
+			-type f \
+			-name ${template%.esht}.esht \
+			| head -n 1 )"
+		TEMPLATE="${TEMPLATE:-${PARTS_DIR%/}/${MAIN_TEMPLATE}}"
+
+		if [ "${EXTENSION}" = 'esht' ]; then
+			mkdir -p "${TEMP_DIR}/${DIRNAME}"
+			FILENAME="${FILENAME%.*}"
+			EXTENSION="$( printf '%s' ${FILENAME##*.} \
+				| tr [:upper:] [:lower:] )"
+			TEMPFILE="${TEMP_DIR}/${DIRNAME}/${FILENAME}"
+			esht -x "${INPUT}" -e \
+				META="${METAFILE}" \
+				CREATED="${DATE_CREATED}" \
+				UPDATED="${DATE_UPDATED}" \
+				> "${TEMPFILE}"
+			INPUT="${TEMPFILE}"
+		fi
+
+		if [ "${EXTENSION}" = "${MARKDOWN_EXT}" ]; then
+			mkdir -p "${TEMP_DIR}/${DIRNAME}"
+			FILENAME="${FILENAME%.*}.part"
+			EXTENSION="$( printf '%s' ${FILENAME##*.} \
+				| tr [:upper:] [:lower:] )"
+			TEMPFILE="${TEMP_DIR}/${DIRNAME}/${FILENAME}"
+			md "${INPUT}" > "${TEMPFILE}"
+			INPUT="${TEMPFILE}"
+		fi
+
+		if [ "${EXTENSION}" = 'part' ]; then
+			mkdir -p "${TEMP_DIR}/${DIRNAME}"
+			EXTENSION="${TEMPLATE%.esht}"
+			EXTENSION="${EXTENSION##*.}"
+			TEMPFILE="${TEMP_DIR}/${DIRNAME}/${FILENAME}.${EXTENSION}"
+			esht -x "${TEMPLATE}" -e \
+				INPUT="${INPUT}" \
+				META="${METAFILE}" \
+				CREATED="$( git_date_created )" \
+				UPDATED="$( git_date_updated )" \
+				> "${TEMPFILE}"
+			INPUT="${TEMPFILE}"
+		fi
+
+		mkdir -p "${BUILD_DIR}/${DIRNAME}"
+		FILENAME="${FILENAME%.*}"
+		cp "${INPUT}" \
+			"${BUILD_DIR}/${DIRNAME}/${FILENAME}.${EXTENSION}"
+	done
+
+	if [ -n "${SITE_INDEX}" ]; then
+		ln -rs "${BUILD_DIR}/${SITE_INDEX}" "${BUILD_DIR}/index.html"
+	fi
+	rm -fr ${TEMP_DIR}
+}
+
+script_serve () {
+	load_cfg
+	if [ -d "${BUILD_DIR}" ]; then
+		trap 'exit 0' INT
+		serve ${BUILD_DIR}
+	else
+		print_error "serve: cannot find BUILD_DIR"
+		exit 1
+	fi
+}
+
+script_config () {
+	load_cfg
+	: > "${CONFIG_FILE}"
+	printf 'SITE_TITLE="%s"\n' "${SITE_TITLE}" >> "${CONFIG_FILE}"
+	printf 'SITE_URL="%s"\n' "${SITE_URL}" >> "${CONFIG_FILE}"
+	printf 'SITE_DESC="%s"\n' "${SITE_DESC}" >> "${CONFIG_FILE}"
+	printf 'SITE_IMAGE="%s"\n' "${SITE_IMAGE}" >> "${CONFIG_FILE}"
+	printf 'SITE_INDEX="%s"\n' "${SITE_INDEX}" >> "${CONFIG_FILE}"
+	printf 'SOURCE_DIR="%s"\n' "${SOURCE_DIR}" >> "${CONFIG_FILE}"
+	printf 'PARTS_DIR="%s"\n' "${PARTS_DIR}" >> "${CONFIG_FILE}"
+	printf 'BUILD_DIR="%s"\n' "${BUILD_DIR}" >> "${CONFIG_FILE}"
+	printf 'TEMP_DIR="%s"\n' "${TEMP_DIR}" >> "${CONFIG_FILE}"
+	printf 'INCLUDES_DIR="%s"\n' "${INCLUDES_DIR}" >> "${CONFIG_FILE}"
+	printf 'MAPPER_FILE="%s"\n' "${MAPPER_FILE}" >> "${CONFIG_FILE}"
+	printf 'ESHT_SCRIPT="%s"\n' "${ESHT_SCRIPT}" >> "${CONFIG_FILE}"
+	printf 'MARKDOWN_EXT="%s"\n' "${MARKDOWN_EXT}" >> "${CONFIG_FILE}"
+	printf 'MARKDOWN_BIN="%s"\n' "${MARKDOWN_BIN}" >> "${CONFIG_FILE}"
+	printf 'MAIN_TEMPLATE="%s"\n' "${MAIN_TEMPLATE}" >> "${CONFIG_FILE}"
+	printf 'META_EXT="%s"\n' "${META_EXT}" >> "${CONFIG_FILE}"
+	printf 'SERVE_BIN="%s"\n' "${SERVE_BIN}" >> "${CONFIG_FILE}"
+}
+
+COMMAND='build'
+
+CONFIG_FILE='./cfg'
+
+SITE_TITLE="${SITE_TITLE:-example}"
+SITE_URL="${SITE_URL:-example.com}"
+SITE_DESC="${SITE_DESC:-}"
+SITE_IMAGE="${SITE_IMAGE:-}"
+SITE_INDEX="${SITE_INDEX:-}"
+SOURCE_DIR="${SOURCE_DIR:-./src}"
+PARTS_DIR="${PARTS_DIR:-./prt}"
+BUILD_DIR="${BUILD_DIR:-./out}"
+TEMP_DIR="${TEMP_DIR:-./tmp}"
+INCLUDES_DIR="${INCLUDES_DIR:-./inc}"
+MAPPER_FILE="${MAPPER_FILE:-./map}"
+ESHT_SCRIPT="${ESHT_SCRIPT:-./lib/esht/esht}"
+MARKDOWN_EXT="${MARKDOWN_EXT:-md}"
+MARKDOWN_BIN="${MARKDOWN_BIN:-markdown}"
+MAIN_TEMPLATE="${MAIN_TEMPLATE:-main.html.esht}"
+META_EXT="${META_EXT:-meta}"
+SERVE_BIN="${SERVE_BIN:-darkhttpd}"
+
+case "${1}" in
+	build) shift ;;
+	serve) COMMAND='serve'; shift ;;
+	config) COMMAND='config'; shift ;;
+esac
+
+DEFKV='false'
+
+while [ $# -gt 0 ]; do
+	case "${1}" in
+		-h|--help) print_help; exit 0 ;;
+		-v|--version) print_version; exit 0 ;;
+		-f|--config-file) DEFKV='false'; parse_cfg "${2}"; shift ;;
+		-e|--env) DEFKV='true' ;;
+		--) DEFKV='false' ;;
+		-*) err_arg "${1}" ;;
+		*) [ "${DEFKV}" = 'true' ] && parse_var "${1}" || err_arg "${1}" ;;
+	esac
+	shift
+done
+
+trap "print_error 'Interrupt signal detected, output may be incomplete'" INT
+
+case ${COMMAND} in
+	serve) script_serve ;;
+	config) script_config ;;
+	build) script_main ;;
+esac
+
+rm ${TEMP_ENV_FILE}
