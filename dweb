@@ -219,12 +219,14 @@ script_main () {
 
 		if [ "${EXTENSION}" = 'esht' ]; then
 			mkdir -p "${TEMP_DIR}/${DIRNAME}"
+			EXTENSION="${FILENAME##*.}"
+			[ -z "${FILENAME%${EXTENSION}}" ] && EXTENSION=''
 			FILENAME="${FILENAME%.*}"
-			EXTENSION="$( printf '%s' ${FILENAME##*.} \
-				| tr [:upper:] [:lower:] )"
 			TEMPFILE="${TEMP_DIR}/${DIRNAME}/${FILENAME}"
 			esht -x "${INPUT}" -e \
 				META="${METAFILE}" \
+				CONFIG="${CONFIG_FILE}" \
+				PAGE="${DIRNAME}/${FILENAME}" \
 				CREATED="${DATE_CREATED}" \
 				UPDATED="${DATE_UPDATED}" \
 				> "${TEMPFILE}"
@@ -233,9 +235,8 @@ script_main () {
 
 		if [ "${EXTENSION}" = "${MARKDOWN_EXT}" ]; then
 			mkdir -p "${TEMP_DIR}/${DIRNAME}"
+			EXTENSION="part"
 			FILENAME="${FILENAME%.*}.part"
-			EXTENSION="$( printf '%s' ${FILENAME##*.} \
-				| tr [:upper:] [:lower:] )"
 			TEMPFILE="${TEMP_DIR}/${DIRNAME}/${FILENAME}"
 			md "${INPUT}" > "${TEMPFILE}"
 			INPUT="${TEMPFILE}"
@@ -249,6 +250,8 @@ script_main () {
 			esht -x "${TEMPLATE}" -e \
 				INPUT="${INPUT}" \
 				META="${METAFILE}" \
+				CONFIG="${CONFIG_FILE}" \
+				PAGE="${DIRNAME}/${FILENAME%.*}.${EXTENSION}" \
 				CREATED="$( git_date_created )" \
 				UPDATED="$( git_date_updated )" \
 				> "${TEMPFILE}"
@@ -256,9 +259,8 @@ script_main () {
 		fi
 
 		mkdir -p "${BUILD_DIR}/${DIRNAME}"
-		FILENAME="${FILENAME%.*}"
 		cp "${INPUT}" \
-			"${BUILD_DIR}/${DIRNAME}/${FILENAME}.${EXTENSION}"
+			"${BUILD_DIR}/${DIRNAME}/${FILENAME%.*}.${EXTENSION}"
 	done
 
 	if [ -n "${SITE_INDEX}" ]; then
