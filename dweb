@@ -264,7 +264,7 @@ script_main () {
 	done
 
 	if [ -n "${SITE_INDEX}" ]; then
-		ln -s "${BUILD_DIR}/${SITE_INDEX}" "${BUILD_DIR}/index.html"
+		cp "${BUILD_DIR}/${SITE_INDEX}" "${BUILD_DIR}/index.html"
 	fi
 	rm -fr ${TEMP_DIR}
 }
