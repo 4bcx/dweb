@@ -153,11 +153,11 @@ load_cfg () {
 
 	if git rev-parse --git-dir &> /dev/null; then
 		git_date_created () {
-			git log --follow --format=%ai -- ${INPUT} 2> /dev/null \
+			git log --follow --format=%aI -- ${INPUT} 2> /dev/null \
 				| tail -n 1
 		}
 		git_date_updated () {
-			git log --follow --format=%ai -- ${INPUT} 2> /dev/null \
+			git log --follow --format=%aI -- ${INPUT} 2> /dev/null \
 				| head -n 1
 		}
 	else
@@ -264,7 +264,7 @@ script_main () {
 	done
 
 	if [ -n "${SITE_INDEX}" ]; then
-		ln -rs "${BUILD_DIR}/${SITE_INDEX}" "${BUILD_DIR}/index.html"
+		ln -s "${BUILD_DIR}/${SITE_INDEX}" "${BUILD_DIR}/index.html"
 	fi
 	rm -fr ${TEMP_DIR}
 }
