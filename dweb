@@ -219,7 +219,8 @@ script_main () {
 
 		if [ "${EXTENSION}" = 'esht' ]; then
 			mkdir -p "${TEMP_DIR}/${DIRNAME}"
-			EXTENSION="${FILENAME##*.}"
+			EXTENSION="${FILENAME%.esht}"
+			EXTENSION="${EXTENSION##*.}"
 			[ -z "${FILENAME%${EXTENSION}}" ] && EXTENSION=''
 			FILENAME="${FILENAME%.*}"
 			TEMPFILE="${TEMP_DIR}/${DIRNAME}/${FILENAME}"
