@@ -153,11 +153,11 @@ load_cfg () {
 
 	if git rev-parse --git-dir &> /dev/null; then
 		git_date_created () {
-			git log --follow --format=%aI -- ${INPUT} 2> /dev/null \
+			git log --follow --format=%at -- ${INPUT} 2> /dev/null \
 				| tail -n 1
 		}
 		git_date_updated () {
-			git log --follow --format=%aI -- ${INPUT} 2> /dev/null \
+			git log --follow --format=%at -- ${INPUT} 2> /dev/null \
 				| head -n 1
 		}
 	else
@@ -207,6 +207,9 @@ script_main () {
 		DIRNAME="${DIRNAME#/}"
 		DIRNAME="${DIRNAME%/}"
 
+		DATE_CREATED="$( git_date_created )"
+		DATE_UPDATED="$( git_date_updated )"
+
 		[ "${FILENAME}" = "${BASENAME}" ] && EXTENSION=''
 		METAFILE="${INPUT}.${META_EXT}"
 		unset template
@@ -253,8 +256,8 @@ script_main () {
 				META="${METAFILE}" \
 				CONFIG="${CONFIG_FILE}" \
 				PAGE="${DIRNAME}/${FILENAME%.*}.${EXTENSION}" \
-				CREATED="$( git_date_created )" \
-				UPDATED="$( git_date_updated )" \
+				CREATED="${DATE_CREATED}" \
+				UPDATED="${DATE_UPDATED}" \
 				> "${TEMPFILE}"
 			INPUT="${TEMPFILE}"
 		fi
